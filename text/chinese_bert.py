@@ -28,13 +28,7 @@ def find_bpes(words, bpes):
     return res
 
 
-def get_bert_feature(
-    text,
-    word2ph,
-    device=config.bert_gen_config.device,
-    style_text=None,
-    style_weight=0.7,
-):
+def get_bert_feature(text, word2ph, device=config.bert_gen_config.device):
     if (
         sys.platform == "darwin"
         and torch.backends.mps.is_available()

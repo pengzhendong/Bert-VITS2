@@ -1,4 +1,6 @@
 import math
+import time
+
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -1062,3 +1064,93 @@ class SynthesizerTrn(nn.Module):
         z = self.flow(z_p, y_mask, g=g, reverse=True)
         o = self.dec((z * y_mask)[:, :, :max_len], g=g)
         return o, attn, y_mask, (z, z_p, m_p, logs_p)
+
+    def infer_streaming(
+        self,
+        x,
+        x_lengths,
+        sid,
+        tone,
+        language,
+        bert,
+        noise_scale=0.667,
+        length_scale=1,
+        noise_scale_w=0.8,
+        max_len=None,
+        sdp_ratio=0,
+        y=None,
+    ):
+        begin = time.time()
+        if self.n_speakers > 0:
+            g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
+        else:
+            g = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
+        print(f"vits2 speaker embeding cost: {int((time.time() - begin) * 1000)}ms")
+
+        begin = time.time()
+        x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, tone, language, bert, g=g)
+        print(f"vits2 text encoder cost: {int((time.time() - begin) * 1000)}ms")
+
+        begin = time.time()
+        logw = self.sdp(x, x_mask, g=g, reverse=True, noise_scale=noise_scale_w) * (
+            sdp_ratio
+        ) + self.dp(x, x_mask, g=g) * (1 - sdp_ratio)
+        w = torch.exp(logw) * x_mask * length_scale
+        w_ceil = torch.ceil(w)
+        y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()
+        y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, None), 1).to(
+            x_mask.dtype
+        )
+        attn_mask = torch.unsqueeze(x_mask, 2) * torch.unsqueeze(y_mask, -1)
+        attn = commons.generate_path(w_ceil, attn_mask)
+        m_p = torch.matmul(attn.squeeze(1), m_p.transpose(1, 2)).transpose(
+            1, 2
+        )  # [b, t', t], [b, t, d] -> [b, d, t']
+        logs_p = torch.matmul(attn.squeeze(1), logs_p.transpose(1, 2)).transpose(
+            1, 2
+        )  # [b, t', t], [b, t, d] -> [b, d, t']
+        z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
+        print(f"vits2 dp cost: {int((time.time() - begin) * 1000)}ms")
+
+        begin = time.time()
+        z = self.flow(z_p, y_mask, g=g, reverse=True) * y_mask
+        print(f"vits2 flow cost: {int((time.time() - begin) * 1000)}ms")
+        # o = self.dec((z * y_mask)[:, :, :max_len], g=g)
+        # yield o[0, 0].data.cpu().float().numpy()
+
+        chunk_size = 40
+        padding = 19
+        upsample_rates = 512
+        z_len = z.shape[-1]
+        for start in range(0, z_len, chunk_size):
+            begin = time.time()
+            end = start + chunk_size
+            if start < padding:
+                # 历史数据长度小于 padding，pad 上所有历史数据
+                l_pad = start * upsample_rates
+                start = 0
+            else:
+                l_pad = padding * upsample_rates
+                start -= padding
+            if end > z_len:
+                r_pad = 0
+                end = z_len
+            elif end + padding > z_len:
+                # 未来数据长度小于 padding，pad 上所有未来数据
+                r_pad = (z_len - end) * upsample_rates
+                end = z_len
+            else:
+                r_pad = padding * upsample_rates
+                end += padding
+
+            o = self.dec(z[:, :, start:end], g=g)
+            o = o[:, :, l_pad:-r_pad] if r_pad != 0 else o[:, :, l_pad:]
+            o = o[0, 0]
+            # clip heading sil
+            if start == 0:
+                # process add blank
+                index = w_ceil[0, 0][0].item() + w_ceil[0, 0][1].item()
+                index = int(index * upsample_rates * 0.5)
+                o = o[index:]
+                print(f"vits2 dec cost: {int((time.time() - begin) * 1000)}ms")
+            yield o.data.cpu().float().numpy()

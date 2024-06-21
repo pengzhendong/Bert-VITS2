@@ -16,7 +16,7 @@ def cleaned_text_to_sequence(cleaned_text, tones, languages):
     return phones, tones, lang_ids
 
 
-def get_bert(norm_text, word2ph, device, style_text=None, style_weight=0.7):
+def get_bert(norm_text, word2ph, device):
     from .chinese_bert import get_bert_feature as zh_bert
 
-    return zh_bert(norm_text, word2ph, device, style_text, style_weight)
+    return zh_bert(norm_text, word2ph, device)
