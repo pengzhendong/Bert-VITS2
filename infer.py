@@ -11,14 +11,14 @@
 import time
 
 import torch
-import commons
+from vits2.utils import commons
 from text import cleaned_text_to_sequence, get_bert
 
 from typing import Union
 from text.cleaner import clean_text
-import utils
+from vits2.utils import task
 
-from models import SynthesizerTrn
+from vits2.models import SynthesizerTrn
 from text.symbols import symbols
 
 
@@ -31,7 +31,7 @@ def get_net_g(model_path: str, device: str, hps):
         **hps.model,
     ).to(device)
     _ = net_g.eval()
-    _ = utils.load_checkpoint(model_path, net_g, None, skip_optimizer=True)
+    _ = task.load_checkpoint(model_path, net_g, None, skip_optimizer=True)
     return net_g
 
 
@@ -49,7 +49,9 @@ def get_text(text, hps, device):
         word2ph[0] += 1
     bert = get_bert(norm_text, word2ph, device)
     del word2ph
-    assert bert.shape[-1] == len(phone), f"Bert seq len {bert.shape[-1]} != {len(phone)}"
+    assert bert.shape[-1] == len(
+        phone
+    ), f"Bert seq len {bert.shape[-1]} != {len(phone)}"
 
     phone = torch.LongTensor(phone)
     tone = torch.LongTensor(tone)

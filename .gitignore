@@ -166,7 +166,6 @@ cython_debug/
 filelists/*
 !/filelists/esd.list
 data/*
-/*.yml
 !/default_config.yml
 /Web/
 /emotional/*/*.bin

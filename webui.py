@@ -2,8 +2,6 @@
 import os
 import logging
 import soxr
-import re_matching
-from tools.sentence import split_by_language
 
 logging.getLogger("numba").setLevel(logging.WARNING)
 logging.getLogger("markdown_it").setLevel(logging.WARNING)
@@ -17,10 +15,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 import torch
-import utils
+from vits2.utils import task
 from infer import infer, get_net_g
 import gradio as gr
-import webbrowser
 import numpy as np
 from config import config
 import librosa
@@ -76,7 +73,9 @@ def tts_fn(
     sample_rate,
 ):
     sample_rate = int(sample_rate)
-    chunks = tts_streaming_fn(text, speaker, sdp_ratio, noise_scale, noise_scale_w, speed_scale, sample_rate)
+    chunks = tts_streaming_fn(
+        text, speaker, sdp_ratio, noise_scale, noise_scale_w, speed_scale, sample_rate
+    )
     audios = []
     for chunk in chunks:
         audios.append(chunk)
@@ -88,10 +87,8 @@ if __name__ == "__main__":
     if config.webui_config.debug:
         logger.info("Enable DEBUG-LEVEL log")
         logging.basicConfig(level=logging.DEBUG)
-    hps = utils.get_hparams_from_file(config.webui_config.config_path)
-    net_g = get_net_g(
-        model_path=config.webui_config.model, device=device, hps=hps
-    )
+    hps = task.get_hparams_from_file(config.webui_config.config_path)
+    net_g = get_net_g(model_path=config.webui_config.model, device=device, hps=hps)
     speaker_ids = hps.data.spk2id
     speakers = list(speaker_ids.keys())
     with gr.Blocks() as app:
@@ -101,11 +98,11 @@ if __name__ == "__main__":
                     label="输入文本内容",
                     placeholder="",
                 )
-                speaker = gr.Dropdown(
-                    choices=speakers, value=speakers[0], label="音色"
-                )
+                speaker = gr.Dropdown(choices=speakers, value=speakers[0], label="音色")
                 sample_rate = gr.Dropdown(
-                    choices=["8000", "16000", "22050", "44100"], value="44100", label="音频采样率"
+                    choices=["8000", "16000", "22050", "44100"],
+                    value="44100",
+                    label="音频采样率",
                 )
                 sdp_ratio = gr.Slider(
                     minimum=0, maximum=1, value=0.7, step=0.1, label="SDP Ratio"
@@ -141,4 +138,8 @@ if __name__ == "__main__":
     tts_fn(text, speakers[0], 0.7, 0.6, 0.7, 1.0, 44100)
     print("推理页面已开启!")
     print(f"http://127.0.0.1:{config.webui_config.port}")
-    app.launch(share=config.webui_config.share, server_name="0.0.0.0", server_port=config.webui_config.port)
+    app.launch(
+        share=config.webui_config.share,
+        server_name="0.0.0.0",
+        server_port=config.webui_config.port,
+    )

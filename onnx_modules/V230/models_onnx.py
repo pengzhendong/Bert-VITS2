@@ -3,15 +3,15 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-import commons
-import modules
+from vits2.utils import commons
+from vits2 import modules
 from . import attentions_onnx
 
 
 from torch.nn import Conv1d, ConvTranspose1d, Conv2d
 from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
 
-from commons import init_weights, get_padding
+from vits2.utils.commons import init_weights, get_padding
 from .text import symbols, num_tones, num_languages
 
 
@@ -332,10 +332,7 @@ class TextEncoder(nn.Module):
         x_mask = torch.ones_like(x).unsqueeze(0)
         bert_emb = self.bert_proj(bert.transpose(0, 1).unsqueeze(0)).transpose(1, 2)
         x = (
-            self.emb(x)
-            + self.tone_emb(tone)
-            + self.language_emb(language)
-            + bert_emb
+            self.emb(x) + self.tone_emb(tone) + self.language_emb(language) + bert_emb
         ) * math.sqrt(
             self.hidden_channels
         )  # [b, t, h]

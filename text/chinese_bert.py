@@ -18,11 +18,11 @@ def find_bpes(words, bpes):
     res = []
     begin = 0
     for target in words:
-        word = ''
+        word = ""
         for end in range(begin, len(bpes)):
             word += bpes[end]
             if word == target or word == "[UNK]":
-                res.append((target, bpes[begin:end + 1]))
+                res.append((target, bpes[begin : end + 1]))
                 begin = end + 1
                 break
     return res

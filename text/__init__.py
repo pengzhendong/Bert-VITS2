@@ -11,7 +11,10 @@ def cleaned_text_to_sequence(cleaned_text, tones, languages):
       List of integers corresponding to the symbols in the text
     """
     phones = [_symbol_to_id[symbol] for symbol in cleaned_text]
-    tones = [tone + language_tone_start_map[language] for tone, language in zip(tones, languages)]
+    tones = [
+        tone + language_tone_start_map[language]
+        for tone, language in zip(tones, languages)
+    ]
     lang_ids = [language_id_map[language] for language in languages]
     return phones, tones, lang_ids
 

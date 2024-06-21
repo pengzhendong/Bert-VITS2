@@ -5,15 +5,15 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-import commons
-import modules
-import attentions
-import monotonic_align
+from vits2.utils import commons
+from vits2 import modules
+from vits2 import attentions
+from vits2.utils import monotonic_align
 
 from torch.nn import Conv1d, ConvTranspose1d, Conv2d
 from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
 
-from commons import init_weights, get_padding
+from .utils.commons import init_weights, get_padding
 from text import symbols, num_tones, num_languages
 
 
@@ -377,10 +377,7 @@ class TextEncoder(nn.Module):
     def forward(self, x, x_lengths, tone, language, bert, g=None):
         bert_emb = self.bert_proj(bert).transpose(1, 2)
         x = (
-            self.emb(x)
-            + self.tone_emb(tone)
-            + self.language_emb(language)
-            + bert_emb
+            self.emb(x) + self.tone_emb(tone) + self.language_emb(language) + bert_emb
         ) * math.sqrt(
             self.hidden_channels
         )  # [b, t, h]
@@ -834,7 +831,7 @@ class SynthesizerTrn(nn.Module):
         n_layers_trans_flow=4,
         flow_share_parameter=False,
         use_transformer_flow=True,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         self.n_vocab = n_vocab

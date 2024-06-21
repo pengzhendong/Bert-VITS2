@@ -2,7 +2,6 @@ from collections import OrderedDict
 from text.symbols import symbols
 import torch
 
-from tools.log import logger
 import utils
 from models import SynthesizerTrn
 import os
@@ -86,4 +85,3 @@ if __name__ == "__main__":
         output = filename + "_release" + half + ext
 
     removeOptimizer(args.config, args.input, args.half, output)
-    logger.info(f"压缩模型成功, 输出模型: {os.path.abspath(output)}")

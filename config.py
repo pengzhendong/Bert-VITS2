@@ -102,28 +102,6 @@ class Bert_gen_config:
         return cls(**data)
 
 
-class Emo_gen_config:
-    """emo_gen 配置"""
-
-    def __init__(
-        self,
-        config_path: str,
-        num_processes: int = 2,
-        device: str = "cuda",
-        use_multi_device: bool = False,
-    ):
-        self.config_path = config_path
-        self.num_processes = num_processes
-        self.device = device
-        self.use_multi_device = use_multi_device
-
-    @classmethod
-    def from_dict(cls, dataset_path: str, data: Dict[str, any]):
-        data["config_path"] = os.path.join(dataset_path, data["config_path"])
-
-        return cls(**data)
-
-
 class Train_ms_config:
     """训练配置"""
 
@@ -163,7 +141,6 @@ class Webui_config:
         device: str,
         model: str,
         config_path: str,
-        language_identification_library: str,
         port: int = 7860,
         share: bool = False,
         debug: bool = False,
@@ -174,39 +151,11 @@ class Webui_config:
         self.port: int = port  # 是否开启debug模式
         self.share: bool = share  # 模型路径
         self.debug: bool = debug  # 配置文件路径
-        self.language_identification_library: str = (
-            language_identification_library  # 语种识别库
-        )
 
     @classmethod
     def from_dict(cls, dataset_path: str, data: Dict[str, any]):
         data["config_path"] = os.path.join(dataset_path, data["config_path"])
         data["model"] = os.path.join(dataset_path, data["model"])
-        return cls(**data)
-
-
-class Server_config:
-    def __init__(
-        self, models: List[Dict[str, any]], port: int = 5000, device: str = "cuda"
-    ):
-        self.models: List[Dict[str, any]] = models  # 需要加载的所有模型的配置
-        self.port: int = port  # 端口号
-        self.device: str = device  # 模型默认使用设备
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, any]):
-        return cls(**data)
-
-
-class Translate_config:
-    """翻译api配置"""
-
-    def __init__(self, app_key: str, secret_key: str):
-        self.app_key = app_key
-        self.secret_key = secret_key
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, any]):
         return cls(**data)
 
 
@@ -222,13 +171,7 @@ class Config:
         with open(file=config_path, mode="r", encoding="utf-8") as file:
             yaml_config: Dict[str, any] = yaml.safe_load(file.read())
             dataset_path: str = yaml_config["dataset_path"]
-            openi_token: str = yaml_config["openi_token"]
             self.dataset_path: str = dataset_path
-            self.mirror: str = yaml_config["mirror"]
-            self.openi_token: str = openi_token
-            self.resample_config: Resample_config = Resample_config.from_dict(
-                dataset_path, yaml_config["resample"]
-            )
             self.preprocess_text_config: Preprocess_text_config = (
                 Preprocess_text_config.from_dict(
                     dataset_path, yaml_config["preprocess_text"]
@@ -237,20 +180,11 @@ class Config:
             self.bert_gen_config: Bert_gen_config = Bert_gen_config.from_dict(
                 dataset_path, yaml_config["bert_gen"]
             )
-            self.emo_gen_config: Emo_gen_config = Emo_gen_config.from_dict(
-                dataset_path, yaml_config["emo_gen"]
-            )
             self.train_ms_config: Train_ms_config = Train_ms_config.from_dict(
                 dataset_path, yaml_config["train_ms"]
             )
             self.webui_config: Webui_config = Webui_config.from_dict(
                 dataset_path, yaml_config["webui"]
-            )
-            self.server_config: Server_config = Server_config.from_dict(
-                yaml_config["server"]
-            )
-            self.translate_config: Translate_config = Translate_config.from_dict(
-                yaml_config["translate"]
             )
 
 
