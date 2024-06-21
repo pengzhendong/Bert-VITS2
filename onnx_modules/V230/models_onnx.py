@@ -316,8 +316,6 @@ class TextEncoder(nn.Module):
         self.language_emb = nn.Embedding(num_languages, hidden_channels)
         nn.init.normal_(self.language_emb.weight, 0.0, hidden_channels**-0.5)
         self.bert_proj = nn.Conv1d(1024, hidden_channels, 1)
-        self.ja_bert_proj = nn.Conv1d(1024, hidden_channels, 1)
-        self.en_bert_proj = nn.Conv1d(1024, hidden_channels, 1)
 
         self.encoder = attentions_onnx.Encoder(
             hidden_channels,
@@ -330,22 +328,14 @@ class TextEncoder(nn.Module):
         )
         self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
 
-    def forward(self, x, x_lengths, tone, language, bert, ja_bert, en_bert, g=None):
+    def forward(self, x, x_lengths, tone, language, bert, g=None):
         x_mask = torch.ones_like(x).unsqueeze(0)
         bert_emb = self.bert_proj(bert.transpose(0, 1).unsqueeze(0)).transpose(1, 2)
-        ja_bert_emb = self.ja_bert_proj(ja_bert.transpose(0, 1).unsqueeze(0)).transpose(
-            1, 2
-        )
-        en_bert_emb = self.en_bert_proj(en_bert.transpose(0, 1).unsqueeze(0)).transpose(
-            1, 2
-        )
         x = (
             self.emb(x)
             + self.tone_emb(tone)
             + self.language_emb(language)
             + bert_emb
-            + ja_bert_emb
-            + en_bert_emb
         ) * math.sqrt(
             self.hidden_channels
         )  # [b, t, h]
@@ -945,8 +935,6 @@ class SynthesizerTrn(nn.Module):
         x_lengths = torch.LongTensor([x.shape[1]]).cpu()
         sid = torch.LongTensor([0]).cpu()
         bert = torch.randn(size=(x.shape[1], 1024)).cpu()
-        ja_bert = torch.randn(size=(x.shape[1], 1024)).cpu()
-        en_bert = torch.randn(size=(x.shape[1], 1024)).cpu()
 
         if self.n_speakers > 0:
             g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
@@ -963,16 +951,14 @@ class SynthesizerTrn(nn.Module):
 
         torch.onnx.export(
             self.enc_p,
-            (x, x_lengths, tone, language, bert, ja_bert, en_bert, g),
+            (x, x_lengths, tone, language, bert, g),
             f"onnx/{path}/{path}_enc_p.onnx",
             input_names=[
                 "x",
                 "x_lengths",
                 "t",
                 "language",
-                "bert_0",
-                "bert_1",
-                "bert_2",
+                "bert",
                 "g",
             ],
             output_names=["xout", "m_p", "logs_p", "x_mask"],
@@ -980,9 +966,7 @@ class SynthesizerTrn(nn.Module):
                 "x": [0, 1],
                 "t": [0, 1],
                 "language": [0, 1],
-                "bert_0": [0],
-                "bert_1": [0],
-                "bert_2": [0],
+                "bert": [0],
                 "xout": [0, 2],
                 "m_p": [0, 2],
                 "logs_p": [0, 2],
@@ -992,9 +976,7 @@ class SynthesizerTrn(nn.Module):
             opset_version=16,
         )
 
-        x, m_p, logs_p, x_mask = self.enc_p(
-            x, x_lengths, tone, language, bert, ja_bert, en_bert, g
-        )
+        x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, tone, language, bert, g)
 
         zinput = (
             torch.randn(x.size(0), 2, x.size(2)).to(device=x.device, dtype=x.dtype)

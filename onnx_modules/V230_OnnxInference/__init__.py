@@ -46,9 +46,7 @@ class OnnxInferenceSession:
         seq,
         tone,
         language,
-        bert_zh,
-        bert_jp,
-        bert_en,
+        bert,
         sid,
         seed=114514,
         seq_noise_scale=0.8,
@@ -62,7 +60,9 @@ class OnnxInferenceSession:
             tone = np.expand_dims(tone, 0)
         if language.ndim == 1:
             language = np.expand_dims(language, 0)
-        assert (seq.ndim == 2, tone.ndim == 2, language.ndim == 2)
+        assert seq.ndim == 2
+        assert tone.ndim == 2
+        assert language.ndim == 2
         g = self.emb_g.run(
             None,
             {
@@ -76,9 +76,7 @@ class OnnxInferenceSession:
                 "x": seq.astype(np.int64),
                 "t": tone.astype(np.int64),
                 "language": language.astype(np.int64),
-                "bert_0": bert_zh.astype(np.float32),
-                "bert_1": bert_jp.astype(np.float32),
-                "bert_2": bert_en.astype(np.float32),
+                "bert": bert.astype(np.float32),
                 "g": g.astype(np.float32),
             },
         )

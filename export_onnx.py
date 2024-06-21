@@ -2,9 +2,9 @@ from onnx_modules import export_onnx
 import os
 
 if __name__ == "__main__":
-    export_path = "BertVits2.2PT"
-    model_path = "model\\G_0.pth"
-    config_path = "model\\config.json"
+    export_path = "BertVits2.3PT"
+    model_path = "Data/models/G_0.pth"
+    config_path = "Data/config.json"
     novq = False
     dev = False
     Extra = "chinese"  # japanese or chinese

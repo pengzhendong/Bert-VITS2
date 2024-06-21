@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 import torch
 import utils
-from infer import infer, latest_version, get_net_g, infer_multilang
+from infer import infer, get_net_g, infer_multilang
 import gradio as gr
 import webbrowser
 import numpy as np
@@ -392,11 +392,7 @@ if __name__ == "__main__":
         logger.info("Enable DEBUG-LEVEL log")
         logging.basicConfig(level=logging.DEBUG)
     hps = utils.get_hparams_from_file(config.webui_config.config_path)
-    # 若config.json中未指定版本则默认为最新版本
-    version = hps.version if hasattr(hps, "version") else latest_version
-    net_g = get_net_g(
-        model_path=config.webui_config.model, version=version, device=device, hps=hps
-    )
+    net_g = get_net_g(model_path=config.webui_config.model, device=device, hps=hps)
     speaker_ids = hps.data.spk2id
     speakers = list(speaker_ids.keys())
     languages = ["ZH", "JP", "EN", "mix", "auto"]
@@ -565,5 +561,5 @@ if __name__ == "__main__":
         )
 
     print("推理页面已开启!")
-    webbrowser.open(f"http://127.0.0.1:{config.webui_config.port}")
-    app.launch(share=config.webui_config.share, server_port=config.webui_config.port)
+    print(f"http://127.0.0.1:{config.webui_config.port}")
+    app.launch(share=config.webui_config.share, server_name="0.0.0.0", server_port=config.webui_config.port)

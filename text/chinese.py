@@ -1,10 +1,9 @@
 import os
 import re
 
-from pypinyin import lazy_pinyin, Style
+from g2p_mix import G2pMix
 
 from text.symbols import punctuation
-from text.tone_sandhi import ToneSandhi
 
 try:
     from tn.chinese.normalizer import Normalizer
@@ -59,122 +58,100 @@ rep_map = {
     "」": "'",
 }
 
-tone_modifier = ToneSandhi()
+g2per = G2pMix()
+
+
+def refine_ph(phn):
+    tone = 0
+    if re.search(r"\d$", phn):
+        tone = int(phn[-1]) + 1
+        phn = phn[:-1]
+    else:
+        tone = 3
+    return phn.lower(), tone
 
 
 def replace_punctuation(text):
     text = text.replace("嗯", "恩").replace("呣", "母")
     pattern = re.compile("|".join(re.escape(p) for p in rep_map.keys()))
-
     replaced_text = pattern.sub(lambda x: rep_map[x.group()], text)
-
-    replaced_text = re.sub(
-        r"[^\u4e00-\u9fa5" + "".join(punctuation) + r"]+", "", replaced_text
-    )
-
     return replaced_text
 
 
 def g2p(text):
-    pattern = r"(?<=[{0}])\s*".format("".join(punctuation))
-    sentences = [i for i in re.split(pattern, text) if i.strip() != ""]
-    phones, tones, word2ph = _g2p(sentences)
+    phones, tones, word2ph, languages = _g2p(text)
     assert sum(word2ph) == len(phones)
-    assert len(word2ph) == len(text)  # Sometimes it will crash,you can add a try-catch.
     phones = ["_"] + phones + ["_"]
     tones = [0] + tones + [0]
     word2ph = [1] + word2ph + [1]
-    return phones, tones, word2ph
+    languages = ["ZH"] + languages + ["ZH"]
+    return phones, tones, word2ph, languages
 
 
-def _get_initials_finals(word):
-    initials = []
-    finals = []
-    orig_initials = lazy_pinyin(word, neutral_tone_with_five=True, style=Style.INITIALS)
-    orig_finals = lazy_pinyin(
-        word, neutral_tone_with_five=True, style=Style.FINALS_TONE3
-    )
-    for c, v in zip(orig_initials, orig_finals):
-        initials.append(c)
-        finals.append(v)
-    return initials, finals
-
-
-def _g2p(segments):
+def _g2p(text):
+    languages_list = []
     phones_list = []
     tones_list = []
     word2ph = []
-    for seg in segments:
-        # Replace all English words in the sentence
-        seg = re.sub("[a-zA-Z]+", "", seg)
-        seg_cut = psg.lcut(seg)
-        initials = []
-        finals = []
-        seg_cut = tone_modifier.pre_merge_for_modify(seg_cut)
-        for word, pos in seg_cut:
-            if pos == "eng":
-                continue
-            sub_initials, sub_finals = _get_initials_finals(word)
-            sub_finals = tone_modifier.modified_tone(word, pos, sub_finals)
-            initials.append(sub_initials)
-            finals.append(sub_finals)
-
-            # assert len(sub_initials) == len(sub_finals) == len(word)
-        initials = sum(initials, [])
-        finals = sum(finals, [])
-        #
-        for c, v in zip(initials, finals):
+    for seg in g2per.g2p(text, sandhi=True):
+        if seg["word"] == seg["phones"]:
+            punct = seg["word"]
+            assert punct in punctuation
+            word2ph.append(1)
+            phones_list.append(punct)
+            tones_list.append(0)
+            languages_list.append("ZH")
+        elif seg["phones"][-1][0].islower():
+            c, v = seg["phones"]
             raw_pinyin = c + v
-            # NOTE: post process for pypinyin outputs
-            # we discriminate i, ii and iii
-            if c == v:
-                assert c in punctuation
-                phone = [c]
-                tone = "0"
-                word2ph.append(1)
+            v_without_tone = v[:-1]
+            tone = v[-1]
+
+            pinyin = c + v_without_tone
+            assert tone in "12345"
+            if c:
+                # 多音节
+                v_rep_map = {
+                    "uei": "ui",
+                    "iou": "iu",
+                    "uen": "un",
+                }
+                if v_without_tone in v_rep_map.keys():
+                    pinyin = c + v_rep_map[v_without_tone]
             else:
-                v_without_tone = v[:-1]
-                tone = v[-1]
-
-                pinyin = c + v_without_tone
-                assert tone in "12345"
-
-                if c:
-                    # 多音节
-                    v_rep_map = {
-                        "uei": "ui",
-                        "iou": "iu",
-                        "uen": "un",
-                    }
-                    if v_without_tone in v_rep_map.keys():
-                        pinyin = c + v_rep_map[v_without_tone]
+                # 单音节
+                pinyin_rep_map = {
+                    "ing": "ying",
+                    "i": "yi",
+                    "in": "yin",
+                    "u": "wu",
+                }
+                if pinyin in pinyin_rep_map.keys():
+                    pinyin = pinyin_rep_map[pinyin]
                 else:
-                    # 单音节
-                    pinyin_rep_map = {
-                        "ing": "ying",
-                        "i": "yi",
-                        "in": "yin",
-                        "u": "wu",
+                    single_rep_map = {
+                        "v": "yu",
+                        "e": "e",
+                        "i": "y",
+                        "u": "w",
                     }
-                    if pinyin in pinyin_rep_map.keys():
-                        pinyin = pinyin_rep_map[pinyin]
-                    else:
-                        single_rep_map = {
-                            "v": "yu",
-                            "e": "e",
-                            "i": "y",
-                            "u": "w",
-                        }
-                        if pinyin[0] in single_rep_map.keys():
-                            pinyin = single_rep_map[pinyin[0]] + pinyin[1:]
-
-                assert pinyin in pinyin_to_symbol_map.keys(), (pinyin, seg, raw_pinyin)
-                phone = pinyin_to_symbol_map[pinyin].split(" ")
-                word2ph.append(len(phone))
-
+                    if pinyin[0] in single_rep_map.keys():
+                        pinyin = single_rep_map[pinyin[0]] + pinyin[1:]
+            assert pinyin in pinyin_to_symbol_map.keys(), (pinyin, seg, raw_pinyin)
+            phone = pinyin_to_symbol_map[pinyin].split(" ")
+            word2ph.append(len(phone))
             phones_list += phone
             tones_list += [int(tone)] * len(phone)
-    return phones_list, tones_list, word2ph
+            languages_list += ["ZH"] * len(phone)
+        if seg["phones"][-1][0].isupper():
+            word2ph.append(len(seg["phones"]))
+            for phn in seg["phones"]:
+                phn, tone = refine_ph(phn)
+                phones_list.append(phn)
+                tones_list.append(tone)
+                languages_list.append("EN")
+
+    return phones_list, tones_list, word2ph, languages_list
 
 
 def text_normalize(text):
