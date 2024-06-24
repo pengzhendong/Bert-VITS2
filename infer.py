@@ -35,18 +35,17 @@ def get_net_g(model_path: str, device: str, hps):
     return net_g
 
 
-def get_text(text, hps, device):
+def get_text(text, device):
     # 在此处实现当前版本的get_text
     norm_text, phone, tone, word2ph, language = clean_text(text)
     phone, tone, language = cleaned_text_to_sequence(phone, tone, language)
 
-    if hps.data.add_blank:
-        phone = commons.intersperse(phone, 0)
-        tone = commons.intersperse(tone, 0)
-        language = commons.intersperse(language, 0)
-        for i in range(len(word2ph)):
-            word2ph[i] = word2ph[i] * 2
-        word2ph[0] += 1
+    phone = commons.intersperse(phone, 0)
+    tone = commons.intersperse(tone, 0)
+    language = commons.intersperse(language, 0)
+    for i in range(len(word2ph)):
+        word2ph[i] = word2ph[i] * 2
+    word2ph[0] += 1
     bert = get_bert(norm_text, word2ph, device)
     del word2ph
     assert bert.shape[-1] == len(
@@ -73,11 +72,7 @@ def infer(
     skip_end=False,
 ):
     begin = time.time()
-    bert, phones, tones, lang_ids = get_text(
-        text,
-        hps,
-        device,
-    )
+    bert, phones, tones, lang_ids = get_text(text, device)
     print(f"g2p and bert cost: {int((time.time() - begin) * 1000)}ms")
     if skip_start:
         phones = phones[3:]

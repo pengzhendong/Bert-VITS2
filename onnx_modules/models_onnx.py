@@ -15,70 +15,6 @@ from vits2.utils.commons import init_weights, get_padding
 from .text import symbols, num_tones, num_languages
 
 
-class DurationDiscriminator(nn.Module):  # vits2
-    def __init__(
-        self, in_channels, filter_channels, kernel_size, p_dropout, gin_channels=0
-    ):
-        super().__init__()
-
-        self.in_channels = in_channels
-        self.filter_channels = filter_channels
-        self.kernel_size = kernel_size
-        self.p_dropout = p_dropout
-        self.gin_channels = gin_channels
-
-        self.drop = nn.Dropout(p_dropout)
-        self.conv_1 = nn.Conv1d(
-            in_channels, filter_channels, kernel_size, padding=kernel_size // 2
-        )
-        self.norm_1 = modules.LayerNorm(filter_channels)
-        self.conv_2 = nn.Conv1d(
-            filter_channels, filter_channels, kernel_size, padding=kernel_size // 2
-        )
-        self.norm_2 = modules.LayerNorm(filter_channels)
-        self.dur_proj = nn.Conv1d(1, filter_channels, 1)
-
-        self.LSTM = nn.LSTM(
-            2 * filter_channels, filter_channels, batch_first=True, bidirectional=True
-        )
-
-        if gin_channels != 0:
-            self.cond = nn.Conv1d(gin_channels, in_channels, 1)
-
-        self.output_layer = nn.Sequential(
-            nn.Linear(2 * filter_channels, 1), nn.Sigmoid()
-        )
-
-    def forward_probability(self, x, dur):
-        dur = self.dur_proj(dur)
-        x = torch.cat([x, dur], dim=1)
-        x = x.transpose(1, 2)
-        x, _ = self.LSTM(x)
-        output_prob = self.output_layer(x)
-        return output_prob
-
-    def forward(self, x, x_mask, dur_r, dur_hat, g=None):
-        x = torch.detach(x)
-        if g is not None:
-            g = torch.detach(g)
-            x = x + self.cond(g)
-        x = self.conv_1(x * x_mask)
-        x = torch.relu(x)
-        x = self.norm_1(x)
-        x = self.drop(x)
-        x = self.conv_2(x * x_mask)
-        x = torch.relu(x)
-        x = self.norm_2(x)
-        x = self.drop(x)
-
-        output_probs = []
-        for dur in [dur_r, dur_hat]:
-            output_prob = self.forward_probability(x, dur)
-            output_probs.append(output_prob)
-
-        return output_probs
-
-
 class TransformerCouplingBlock(nn.Module):
     def __init__(
         self,
@@ -510,250 +446,6 @@ class Generator(torch.nn.Module):
             layer.remove_weight_norm()
 
 
-class DiscriminatorP(torch.nn.Module):
-    def __init__(self, period, kernel_size=5, stride=3, use_spectral_norm=False):
-        super(DiscriminatorP, self).__init__()
-        self.period = period
-        self.use_spectral_norm = use_spectral_norm
-        norm_f = weight_norm if use_spectral_norm is False else spectral_norm
-        self.convs = nn.ModuleList(
-            [
-                norm_f(
-                    Conv2d(
-                        1,
-                        32,
-                        (kernel_size, 1),
-                        (stride, 1),
-                        padding=(get_padding(kernel_size, 1), 0),
-                    )
-                ),
-                norm_f(
-                    Conv2d(
-                        32,
-                        128,
-                        (kernel_size, 1),
-                        (stride, 1),
-                        padding=(get_padding(kernel_size, 1), 0),
-                    )
-                ),
-                norm_f(
-                    Conv2d(
-                        128,
-                        512,
-                        (kernel_size, 1),
-                        (stride, 1),
-                        padding=(get_padding(kernel_size, 1), 0),
-                    )
-                ),
-                norm_f(
-                    Conv2d(
-                        512,
-                        1024,
-                        (kernel_size, 1),
-                        (stride, 1),
-                        padding=(get_padding(kernel_size, 1), 0),
-                    )
-                ),
-                norm_f(
-                    Conv2d(
-                        1024,
-                        1024,
-                        (kernel_size, 1),
-                        1,
-                        padding=(get_padding(kernel_size, 1), 0),
-                    )
-                ),
-            ]
-        )
-        self.conv_post = norm_f(Conv2d(1024, 1, (3, 1), 1, padding=(1, 0)))
-
-    def forward(self, x):
-        fmap = []
-
-        # 1d to 2d
-        b, c, t = x.shape
-        if t % self.period != 0:  # pad first
-            n_pad = self.period - (t % self.period)
-            x = F.pad(x, (0, n_pad), "reflect")
-            t = t + n_pad
-        x = x.view(b, c, t // self.period, self.period)
-
-        for layer in self.convs:
-            x = layer(x)
-            x = F.leaky_relu(x, modules.LRELU_SLOPE)
-            fmap.append(x)
-        x = self.conv_post(x)
-        fmap.append(x)
-        x = torch.flatten(x, 1, -1)
-
-        return x, fmap
-
-
-class DiscriminatorS(torch.nn.Module):
-    def __init__(self, use_spectral_norm=False):
-        super(DiscriminatorS, self).__init__()
-        norm_f = weight_norm if use_spectral_norm is False else spectral_norm
-        self.convs = nn.ModuleList(
-            [
-                norm_f(Conv1d(1, 16, 15, 1, padding=7)),
-                norm_f(Conv1d(16, 64, 41, 4, groups=4, padding=20)),
-                norm_f(Conv1d(64, 256, 41, 4, groups=16, padding=20)),
-                norm_f(Conv1d(256, 1024, 41, 4, groups=64, padding=20)),
-                norm_f(Conv1d(1024, 1024, 41, 4, groups=256, padding=20)),
-                norm_f(Conv1d(1024, 1024, 5, 1, padding=2)),
-            ]
-        )
-        self.conv_post = norm_f(Conv1d(1024, 1, 3, 1, padding=1))
-
-    def forward(self, x):
-        fmap = []
-
-        for layer in self.convs:
-            x = layer(x)
-            x = F.leaky_relu(x, modules.LRELU_SLOPE)
-            fmap.append(x)
-        x = self.conv_post(x)
-        fmap.append(x)
-        x = torch.flatten(x, 1, -1)
-
-        return x, fmap
-
-
-class MultiPeriodDiscriminator(torch.nn.Module):
-    def __init__(self, use_spectral_norm=False):
-        super(MultiPeriodDiscriminator, self).__init__()
-        periods = [2, 3, 5, 7, 11]
-
-        discs = [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
-        discs = discs + [
-            DiscriminatorP(i, use_spectral_norm=use_spectral_norm) for i in periods
-        ]
-        self.discriminators = nn.ModuleList(discs)
-
-    def forward(self, y, y_hat):
-        y_d_rs = []
-        y_d_gs = []
-        fmap_rs = []
-        fmap_gs = []
-        for i, d in enumerate(self.discriminators):
-            y_d_r, fmap_r = d(y)
-            y_d_g, fmap_g = d(y_hat)
-            y_d_rs.append(y_d_r)
-            y_d_gs.append(y_d_g)
-            fmap_rs.append(fmap_r)
-            fmap_gs.append(fmap_g)
-
-        return y_d_rs, y_d_gs, fmap_rs, fmap_gs
-
-
-class WavLMDiscriminator(nn.Module):
-    """docstring for Discriminator."""
-
-    def __init__(
-        self, slm_hidden=768, slm_layers=13, initial_channel=64, use_spectral_norm=False
-    ):
-        super(WavLMDiscriminator, self).__init__()
-        norm_f = weight_norm if use_spectral_norm == False else spectral_norm
-        self.pre = norm_f(
-            Conv1d(slm_hidden * slm_layers, initial_channel, 1, 1, padding=0)
-        )
-
-        self.convs = nn.ModuleList(
-            [
-                norm_f(
-                    nn.Conv1d(
-                        initial_channel, initial_channel * 2, kernel_size=5, padding=2
-                    )
-                ),
-                norm_f(
-                    nn.Conv1d(
-                        initial_channel * 2,
-                        initial_channel * 4,
-                        kernel_size=5,
-                        padding=2,
-                    )
-                ),
-                norm_f(
-                    nn.Conv1d(initial_channel * 4, initial_channel * 4, 5, 1, padding=2)
-                ),
-            ]
-        )
-
-        self.conv_post = norm_f(Conv1d(initial_channel * 4, 1, 3, 1, padding=1))
-
-    def forward(self, x):
-        x = self.pre(x)
-
-        fmap = []
-        for l in self.convs:
-            x = l(x)
-            x = F.leaky_relu(x, modules.LRELU_SLOPE)
-            fmap.append(x)
-        x = self.conv_post(x)
-        x = torch.flatten(x, 1, -1)
-
-        return x
-
-
-class ReferenceEncoder(nn.Module):
-    """
-    inputs --- [N, Ty/r, n_mels*r]  mels
-    outputs --- [N, ref_enc_gru_size]
-    """
-
-    def __init__(self, spec_channels, gin_channels=0):
-        super().__init__()
-        self.spec_channels = spec_channels
-        ref_enc_filters = [32, 32, 64, 64, 128, 128]
-        K = len(ref_enc_filters)
-        filters = [1] + ref_enc_filters
-        convs = [
-            weight_norm(
-                nn.Conv2d(
-                    in_channels=filters[i],
-                    out_channels=filters[i + 1],
-                    kernel_size=(3, 3),
-                    stride=(2, 2),
-                    padding=(1, 1),
-                )
-            )
-            for i in range(K)
-        ]
-        self.convs = nn.ModuleList(convs)
-        # self.wns = nn.ModuleList([weight_norm(num_features=ref_enc_filters[i]) for i in range(K)]) # noqa: E501
-
-        out_channels = self.calculate_channels(spec_channels, 3, 2, 1, K)
-        self.gru = nn.GRU(
-            input_size=ref_enc_filters[-1] * out_channels,
-            hidden_size=256 // 2,
-            batch_first=True,
-        )
-        self.proj = nn.Linear(128, gin_channels)
-
-    def forward(self, inputs, mask=None):
-        N = inputs.size(0)
-        out = inputs.view(N, 1, -1, self.spec_channels)  # [N, 1, Ty, n_freqs]
-        for conv in self.convs:
-            out = conv(out)
-            # out = wn(out)
-            out = F.relu(out)  # [N, 128, Ty//2^K, n_mels//2^K]
-
-        out = out.transpose(1, 2)  # [N, Ty//2^K, 128, n_mels//2^K]
-        T = out.size(1)
-        N = out.size(0)
-        out = out.contiguous().view(N, T, -1)  # [N, Ty//2^K, 128*n_mels//2^K]
-
-        self.gru.flatten_parameters()
-        memory, out = self.gru(out)  # out --- [1, N, 128]
-
-        return self.proj(out.squeeze(0))
-
-    def calculate_channels(self, L, kernel_size, stride, pad, n_convs):
-        for i in range(n_convs):
-            L = (L - kernel_size + 2 * pad) // stride + 1
-        return L
-
-
 class SynthesizerTrn(nn.Module):
     """
     Synthesizer for Training
@@ -874,11 +566,7 @@ class SynthesizerTrn(nn.Module):
         self.dp = DurationPredictor(
             hidden_channels, 256, 3, 0.5, gin_channels=gin_channels
         )
-
-        if n_speakers >= 1:
-            self.emb_g = nn.Embedding(n_speakers, gin_channels)
-        else:
-            self.ref_enc = ReferenceEncoder(spec_channels, gin_channels)
+        self.emb_g = nn.Embedding(n_speakers, gin_channels)
 
     def export_onnx(
         self,
@@ -933,18 +621,15 @@ class SynthesizerTrn(nn.Module):
         sid = torch.LongTensor([0]).cpu()
         bert = torch.randn(size=(x.shape[1], 1024)).cpu()
 
-        if self.n_speakers > 0:
-            g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
-            torch.onnx.export(
-                self.emb_g,
-                (sid),
-                f"onnx/{path}/{path}_emb.onnx",
-                input_names=["sid"],
-                output_names=["g"],
-                verbose=True,
-            )
-        else:
-            g = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
+        g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
+        torch.onnx.export(
+            self.emb_g,
+            (sid),
+            f"onnx/{path}/{path}_emb.onnx",
+            input_names=["sid"],
+            output_names=["g"],
+            verbose=True,
+        )
 
         torch.onnx.export(
             self.enc_p,
