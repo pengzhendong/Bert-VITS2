@@ -187,12 +187,12 @@ class OnnxInferenceSession:
             yield o
 
 
-def tts(session, text):
+def tts(session, text, sid=0):
     begin = time.time()
     bert, phone, tone, language = get_text(text, "cuda")
     logging.info("bert cost: %sms", int((time.time() - begin) * 1000))
     bert = bert.numpy().T
-    sid = np.array([0])
+    sid = np.array([sid])
     audios = []
 
     for chunk in session(phone.numpy(), tone.numpy(), language.numpy(), bert, sid):
@@ -216,7 +216,8 @@ def main():
         providers=[("CUDAExecutionProvider", {"cudnn_conv_algo_search": "DEFAULT"})],
     )
 
-    audio = tts(session, "测试一下")
+    audio = tts(session, "一二三四") # 预热
+    audio = tts(session, "也不知道这群牛娃进入社会后能不能change the world", 1)
     sf.write("test.wav", audio, 44100)
 
 

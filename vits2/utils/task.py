@@ -6,7 +6,6 @@ import json
 import shutil
 import subprocess
 import numpy as np
-from scipy.io.wavfile import read
 import torch
 import re
 
@@ -175,11 +174,6 @@ def plot_alignment_to_numpy(alignment, info=None):
     data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
     plt.close()
     return data
-
-
-def load_wav_to_torch(full_path):
-    sampling_rate, data = read(full_path)
-    return torch.FloatTensor(data.astype(np.float32)), sampling_rate
 
 
 def load_filepaths_and_text(filename, split="|"):

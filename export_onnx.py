@@ -6,11 +6,8 @@ from text.symbols import symbols
 from vits2.utils.task import get_hparams_from_file, load_checkpoint
 
 
-def export_onnx(export_path, model_path, config_path, novq, dev, Extra):
+def export_onnx(export_path, model_path, config_path):
     hps = get_hparams_from_file(config_path)
-    enable_emo = False
-    BertPaths = ["chinese-roberta-wwm-ext-large"]
-
     net_g = SynthesizerTrn(
         len(symbols),
         hps.data.filter_length // 2 + 1,
@@ -27,23 +24,15 @@ def export_onnx(export_path, model_path, config_path, novq, dev, Extra):
     for key in hps.data.spk2id.keys():
         spklist.append(key)
 
-    LangDict = {"ZH": [0, 0], "JP": [1, 6], "EN": [2, 8]}
-    BertSize = 1024
-
     MoeVSConf = {
-        "Folder": f"{export_path}",
-        "Name": f"{export_path}",
+        "Folder": export_path,
+        "Name": export_path,
         "Type": "BertVits",
         "Symbol": symbols,
-        "Cleaner": "",
         "Rate": hps.data.sampling_rate,
-        "CharaMix": True,
         "Characters": spklist,
-        "LanguageMap": LangDict,
-        "Dict": "BasicDict",
-        "BertPath": BertPaths,
-        "Clap": ("clap-htsat-fused" if enable_emo else False),
-        "BertSize": BertSize,
+        "BertPath": "chinese-roberta-wwm-ext-large",
+        "BertSize": 1024,
     }
 
     with open(f"onnx/{export_path}.json", "w") as MoeVsConfFile:
@@ -54,11 +43,8 @@ if __name__ == "__main__":
     export_path = "BertVits2.3PT"
     model_path = "Data/models/G_0.pth"
     config_path = "Data/config.json"
-    novq = False
-    dev = False
-    Extra = "chinese"  # japanese or chinese
     if not os.path.exists("onnx"):
         os.makedirs("onnx")
     if not os.path.exists(f"onnx/{export_path}"):
         os.makedirs(f"onnx/{export_path}")
-    export_onnx(export_path, model_path, config_path, novq, dev, Extra)
+    export_onnx(export_path, model_path, config_path)

@@ -2,11 +2,12 @@ import logging
 import os
 import random
 import torch
+import torchaudio
 import torch.utils.data
 from tqdm import tqdm
-import commons
-from mel_processing import spectrogram_torch, mel_spectrogram_torch
-from utils import load_wav_to_torch, load_filepaths_and_text
+from .utils import commons
+from .utils.mel_processing import spectrogram_torch, mel_spectrogram_torch
+from .utils.task import load_filepaths_and_text
 from text import cleaned_text_to_sequence
 from config import config
 
@@ -45,7 +46,6 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
         self.cleaned_text = getattr(hparams, "cleaned_text", False)
 
-        self.add_blank = hparams.add_blank
         self.min_text_len = getattr(hparams, "min_text_len", 1)
         self.max_text_len = getattr(hparams, "max_text_len", 384)
 
@@ -65,16 +65,14 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         lengths = []
         skipped = 0
         logger.info("Init dataset...")
-        for _id, spk, language, text, phones, tone, word2ph in tqdm(
-            self.audiopaths_sid_text
-        ):
+        for _id, spk, text, phones, tone, word2ph, langs in tqdm(self.audiopaths_sid_text):
             audiopath = f"{_id}"
             if self.min_text_len <= len(phones) and len(phones) <= self.max_text_len:
                 phones = phones.split(" ")
                 tone = [int(i) for i in tone.split(" ")]
                 word2ph = [int(i) for i in word2ph.split(" ")]
                 audiopaths_sid_text_new.append(
-                    [audiopath, spk, language, text, phones, tone, word2ph]
+                    [audiopath, spk, langs.split(), text, phones, tone, word2ph]
                 )
                 lengths.append(os.path.getsize(audiopath) // (2 * self.hop_length))
             else:
@@ -92,23 +90,23 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         # separate filename, speaker_id and text
         audiopath, sid, language, text, phones, tone, word2ph = audiopath_sid_text
 
-        bert, ja_bert, en_bert, phones, tone, language = self.get_text(
+        bert, phones, tone, language = self.get_text(
             text, word2ph, phones, tone, language, audiopath
         )
 
         spec, wav = self.get_audio(audiopath)
         sid = torch.LongTensor([int(self.spk_map[sid])])
 
-        return (phones, spec, wav, sid, tone, language, bert, ja_bert, en_bert)
+        return (phones, spec, wav, sid, tone, language, bert)
 
     def get_audio(self, filename):
-        audio, sampling_rate = load_wav_to_torch(filename)
+        audio, sampling_rate = torchaudio.load(filename, normalize=False)
         if sampling_rate != self.sampling_rate:
-            raise ValueError(
-                "{} {} SR doesn't match target {} SR".format(
-                    filename, sampling_rate, self.sampling_rate
-                )
-            )
+            audio = audio.to(torch.float)
+            audio = torchaudio.transforms.Resample(sampling_rate,
+                                                   self.sampling_rate)(audio)
+            audio = audio.to(torch.int16)
+        audio = audio[0]  # Get the first channel
         audio_norm = audio / self.max_wav_value
         audio_norm = audio_norm.unsqueeze(0)
         spec_filename = filename.replace(".wav", ".spec.pt")
@@ -145,37 +143,20 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
     def get_text(self, text, word2ph, phone, tone, language_str, wav_path):
         phone, tone, language = cleaned_text_to_sequence(phone, tone, language_str)
-        if self.add_blank:
-            phone = commons.intersperse(phone, 0)
-            tone = commons.intersperse(tone, 0)
-            language = commons.intersperse(language, 0)
-            for i in range(len(word2ph)):
-                word2ph[i] = word2ph[i] * 2
-            word2ph[0] += 1
-        bert_path = wav_path.replace(".wav", ".bert.pt")
-        try:
-            bert_ori = torch.load(bert_path)
-            assert bert_ori.shape[-1] == len(phone)
-        except Exception as e:
-            logger.warning("Bert load Failed")
-            logger.warning(e)
+        phone = commons.intersperse(phone, 0)
+        tone = commons.intersperse(tone, 0)
+        language = commons.intersperse(language, 0)
+        for i in range(len(word2ph)):
+            word2ph[i] = word2ph[i] * 2
+        word2ph[0] += 1
+        bert_path = wav_path.replace(".wav", ".roberta.pt")
+        bert = torch.load(bert_path)
+        assert bert.shape[-1] == len(phone)
 
-        if language_str == "ZH":
-            bert = bert_ori
-            ja_bert = torch.randn(1024, len(phone))
-            en_bert = torch.randn(1024, len(phone))
-        elif language_str == "JP":
-            bert = torch.randn(1024, len(phone))
-            ja_bert = bert_ori
-            en_bert = torch.randn(1024, len(phone))
-        elif language_str == "EN":
-            bert = torch.randn(1024, len(phone))
-            ja_bert = torch.randn(1024, len(phone))
-            en_bert = bert_ori
         phone = torch.LongTensor(phone)
         tone = torch.LongTensor(tone)
         language = torch.LongTensor(language)
-        return bert, ja_bert, en_bert, phone, tone, language
+        return bert, phone, tone, language
 
     def get_sid(self, sid):
         sid = torch.LongTensor([int(sid)])
@@ -258,12 +239,6 @@ class TextAudioSpeakerCollate:
             bert = row[6]
             bert_padded[i, :, : bert.size(1)] = bert
 
-            ja_bert = row[7]
-            ja_bert_padded[i, :, : ja_bert.size(1)] = ja_bert
-
-            en_bert = row[8]
-            en_bert_padded[i, :, : en_bert.size(1)] = en_bert
-
         return (
             text_padded,
             text_lengths,
@@ -275,8 +250,6 @@ class TextAudioSpeakerCollate:
             tone_padded,
             language_padded,
             bert_padded,
-            ja_bert_padded,
-            en_bert_padded,
         )
 
 

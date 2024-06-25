@@ -8,7 +8,6 @@ from tqdm import tqdm
 import click
 from text.cleaner import clean_text
 from config import config
-from infer import latest_version
 
 preprocess_text_config = config.preprocess_text_config
 
@@ -53,19 +52,17 @@ def preprocess(
                 if len(lines) != 0:
                     for line in tqdm(lines):
                         try:
-                            utt, spk, language, text = line.strip().split("|")
-                            norm_text, phones, tones, word2ph = clean_text(
-                                text, language
-                            )
+                            utt, spk, text = line.strip().split("|")
+                            norm_text, phones, tones, word2ph, langs = clean_text(text)
                             out_file.write(
                                 "{}|{}|{}|{}|{}|{}|{}\n".format(
                                     utt,
                                     spk,
-                                    language,
                                     norm_text,
                                     " ".join(phones),
                                     " ".join([str(i) for i in tones]),
                                     " ".join([str(i) for i in word2ph]),
+                                    " ".join(langs),
                                 )
                             )
                         except Exception as e:
@@ -82,7 +79,7 @@ def preprocess(
         countSame = 0
         countNotFound = 0
         for line in f.readlines():
-            utt, spk, language, text, phones, tones, word2ph = line.strip().split("|")
+            utt, spk, text, phones, tones, word2ph, langs = line.strip().split("|")
             if utt in audioPaths:
                 # 过滤数据集错误：相同的音频匹配多个文本，导致后续bert出问题
                 print(f"重复音频文本：{line}")
@@ -94,7 +91,7 @@ def preprocess(
                 countNotFound += 1
                 continue
             audioPaths.add(utt)
-            spk_utt_map[language].append(line)
+            spk_utt_map["ZH"].append(line)
             if spk not in spk_id_map.keys():
                 spk_id_map[spk] = current_sid
                 current_sid += 1
@@ -125,7 +122,6 @@ def preprocess(
     json_config["data"]["spk2id"] = spk_id_map
     json_config["data"]["n_speakers"] = len(spk_id_map)
     # 新增写入：写入训练版本、数据集路径
-    json_config["version"] = latest_version
     json_config["data"]["training_files"] = os.path.normpath(train_path).replace(
         "\\", "/"
     )

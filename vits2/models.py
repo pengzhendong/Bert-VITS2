@@ -937,16 +937,12 @@ class SynthesizerTrn(nn.Module):
         tone,
         language,
         bert,
-        ja_bert,
-        en_bert,
     ):
         if self.n_speakers > 0:
             g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
         else:
             g = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
-        x, m_p, logs_p, x_mask = self.enc_p(
-            x, x_lengths, tone, language, bert, ja_bert, en_bert, g=g
-        )
+        x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, tone, language, bert, g=g)
         z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)
         z_p = self.flow(z, y_mask, g=g)
 

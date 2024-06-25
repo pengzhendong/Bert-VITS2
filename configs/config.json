@@ -20,10 +20,7 @@
     "c_kl": 1.0,
     "c_commit": 100,
     "skip_optimizer": true,
-    "freeze_ZH_bert": false,
-    "freeze_JP_bert": false,
-    "freeze_EN_bert": false,
-    "freeze_emo": false
+    "freeze_ZH_bert": false
   },
   "data": {
     "training_files": "filelists/train.list",
@@ -36,7 +33,6 @@
     "n_mel_channels": 128,
     "mel_fmin": 0.0,
     "mel_fmax": null,
-    "add_blank": true,
     "n_speakers": 850,
     "cleaned_text": true,
     "spk2id": {
@@ -946,12 +942,11 @@
     "use_spectral_norm": false,
     "gin_channels": 512,
     "slm": {
-        "model": "./slm/wavlm-base-plus",
-        "sr": 16000,
-        "hidden": 768,
-        "nlayers": 13,
-        "initial_channel": 64
+      "model": "./slm/wavlm-base-plus",
+      "sr": 16000,
+      "hidden": 768,
+      "nlayers": 13,
+      "initial_channel": 64
     }
-  },
-  "version": "2.3"
+  }
 }

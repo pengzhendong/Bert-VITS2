@@ -15,27 +15,27 @@ import argparse
 import datetime
 
 logging.getLogger("numba").setLevel(logging.WARNING)
-import commons
-import utils
-from data_utils import (
+from vits2.utils import commons
+from vits2.utils import task
+from vits2.data_utils import (
     TextAudioSpeakerLoader,
     TextAudioSpeakerCollate,
     DistributedBucketSampler,
 )
-from models import (
+from vits2.models import (
     SynthesizerTrn,
     MultiPeriodDiscriminator,
     DurationDiscriminator,
     WavLMDiscriminator,
 )
-from losses import (
+from vits2.losses import (
     generator_loss,
     discriminator_loss,
     feature_loss,
     kl_loss,
     WavLMLoss,
 )
-from mel_processing import mel_spectrogram_torch, spec_to_mel_torch
+from vits2.utils.mel_processing import mel_spectrogram_torch, spec_to_mel_torch
 from text.symbols import symbols
 
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -81,7 +81,7 @@ def run():
     n_gpus = dist.get_world_size()
 
     # 命令行/config.yml配置解析
-    # hps = utils.get_hparams()
+    # hps = task.get_hparams()
     parser = argparse.ArgumentParser()
     # 非必要不建议使用命令行配置，请使用config.yml文件
     parser.add_argument(
@@ -99,11 +99,11 @@ def run():
         help="数据集文件夹路径，请注意，数据不再默认放在/logs文件夹下。如果需要用命令行配置，请声明相对于根目录的路径",
         default=config.dataset_path,
     )
-    args = parser.parse_known_args()
+    args, unparsed = parser.parse_known_args()
     model_dir = os.path.join(args.model, config.train_ms_config.model)
     if not os.path.exists(model_dir):
         os.makedirs(model_dir, exist_ok=True)
-    hps = utils.get_hparams_from_file(args.config)
+    hps = task.get_hparams_from_file(args.config)
     hps.model_dir = model_dir
     # 比较路径是否相同
     if os.path.realpath(args.config) != os.path.realpath(
@@ -119,9 +119,9 @@ def run():
 
     global global_step
     if rank == 0:
-        logger = utils.get_logger(hps.model_dir)
+        logger = task.get_logger(hps.model_dir)
         logger.info(hps)
-        utils.check_git_hash(hps.model_dir)
+        task.check_git_hash(hps.model_dir)
         writer = SummaryWriter(log_dir=hps.model_dir)
         writer_eval = SummaryWriter(log_dir=os.path.join(hps.model_dir, "eval"))
     train_dataset = TextAudioSpeakerLoader(hps.data.training_files, hps.data)
@@ -206,16 +206,6 @@ def run():
         for param in net_g.enc_p.bert_proj.parameters():
             param.requires_grad = False
 
-    if getattr(hps.train, "freeze_EN_bert", False):
-        print("Freezing EN bert encoder !!!")
-        for param in net_g.enc_p.en_bert_proj.parameters():
-            param.requires_grad = False
-
-    if getattr(hps.train, "freeze_JP_bert", False):
-        print("Freezing JP bert encoder !!!")
-        for param in net_g.enc_p.ja_bert_proj.parameters():
-            param.requires_grad = False
-
     net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda(local_rank)
     net_wd = WavLMDiscriminator(
         hps.model.slm.hidden, hps.model.slm.nlayers, hps.model.slm.initial_channel
@@ -257,20 +247,12 @@ def run():
             bucket_cap_mb=512,
         )
 
-    # 下载底模
-    if config.train_ms_config.base["use_base_model"]:
-        utils.download_checkpoint(
-            hps.model_dir,
-            config.train_ms_config.base,
-            token=config.openi_token,
-            mirror=config.mirror,
-        )
     dur_resume_lr = hps.train.learning_rate
     wd_resume_lr = hps.train.learning_rate
     if net_dur_disc is not None:
         try:
-            _, _, dur_resume_lr, epoch_str = utils.load_checkpoint(
-                utils.latest_checkpoint_path(hps.model_dir, "DUR_*.pth"),
+            _, _, dur_resume_lr, epoch_str = task.load_checkpoint(
+                task.latest_checkpoint_path(hps.model_dir, "DUR_*.pth"),
                 net_dur_disc,
                 optim_dur_disc,
                 skip_optimizer=(
@@ -283,16 +265,16 @@ def run():
             print("Initialize dur_disc")
 
     try:
-        _, optim_g, g_resume_lr, epoch_str = utils.load_checkpoint(
-            utils.latest_checkpoint_path(hps.model_dir, "G_*.pth"),
+        _, optim_g, g_resume_lr, epoch_str = task.load_checkpoint(
+            task.latest_checkpoint_path(hps.model_dir, "G_*.pth"),
             net_g,
             optim_g,
             skip_optimizer=(
                 hps.train.skip_optimizer if "skip_optimizer" in hps.train else True
             ),
         )
-        _, optim_d, d_resume_lr, epoch_str = utils.load_checkpoint(
-            utils.latest_checkpoint_path(hps.model_dir, "D_*.pth"),
+        _, optim_d, d_resume_lr, epoch_str = task.load_checkpoint(
+            task.latest_checkpoint_path(hps.model_dir, "D_*.pth"),
             net_d,
             optim_d,
             skip_optimizer=(
@@ -307,7 +289,7 @@ def run():
         epoch_str = max(epoch_str, 1)
         # global_step = (epoch_str - 1) * len(train_loader)
         global_step = int(
-            utils.get_steps(utils.latest_checkpoint_path(hps.model_dir, "G_*.pth"))
+            task.get_steps(task.latest_checkpoint_path(hps.model_dir, "G_*.pth"))
         )
         print(
             f"******************检测到模型存在，epoch为 {epoch_str}，gloabl step为 {global_step}*********************"
@@ -318,8 +300,8 @@ def run():
         global_step = 0
 
     try:
-        _, optim_wd, wd_resume_lr, epoch_str = utils.load_checkpoint(
-            utils.latest_checkpoint_path(hps.model_dir, "WD_*.pth"),
+        _, optim_wd, wd_resume_lr, epoch_str = task.load_checkpoint(
+            task.latest_checkpoint_path(hps.model_dir, "WD_*.pth"),
             net_wd,
             optim_wd,
             skip_optimizer=(
@@ -430,8 +412,6 @@ def train_and_evaluate(
         tone,
         language,
         bert,
-        ja_bert,
-        en_bert,
     ) in enumerate(tqdm(train_loader)):
         if net_g.module.use_noise_scaled_mas:
             current_mas_noise_scale = (
@@ -452,8 +432,6 @@ def train_and_evaluate(
         tone = tone.cuda(local_rank, non_blocking=True)
         language = language.cuda(local_rank, non_blocking=True)
         bert = bert.cuda(local_rank, non_blocking=True)
-        ja_bert = ja_bert.cuda(local_rank, non_blocking=True)
-        en_bert = en_bert.cuda(local_rank, non_blocking=True)
 
         with autocast(enabled=hps.train.bf16_run, dtype=torch.bfloat16):
             (
@@ -475,8 +453,6 @@ def train_and_evaluate(
                 tone,
                 language,
                 bert,
-                ja_bert,
-                en_bert,
             )
             mel = spec_to_mel_torch(
                 spec,
@@ -672,20 +648,20 @@ def train_and_evaluate(
                     )
 
                 image_dict = {
-                    "slice/mel_org": utils.plot_spectrogram_to_numpy(
+                    "slice/mel_org": task.plot_spectrogram_to_numpy(
                         y_mel[0].data.cpu().numpy()
                     ),
-                    "slice/mel_gen": utils.plot_spectrogram_to_numpy(
+                    "slice/mel_gen": task.plot_spectrogram_to_numpy(
                         y_hat_mel[0].data.cpu().numpy()
                     ),
-                    "all/mel": utils.plot_spectrogram_to_numpy(
+                    "all/mel": task.plot_spectrogram_to_numpy(
                         mel[0].data.cpu().numpy()
                     ),
-                    "all/attn": utils.plot_alignment_to_numpy(
+                    "all/attn": task.plot_alignment_to_numpy(
                         attn[0, 0].data.cpu().numpy()
                     ),
                 }
-                utils.summarize(
+                task.summarize(
                     writer=writer,
                     global_step=global_step,
                     images=image_dict,
@@ -694,21 +670,21 @@ def train_and_evaluate(
 
             if global_step % hps.train.eval_interval == 0:
                 evaluate(hps, net_g, eval_loader, writer_eval)
-                utils.save_checkpoint(
+                task.save_checkpoint(
                     net_g,
                     optim_g,
                     hps.train.learning_rate,
                     epoch,
                     os.path.join(hps.model_dir, "G_{}.pth".format(global_step)),
                 )
-                utils.save_checkpoint(
+                task.save_checkpoint(
                     net_d,
                     optim_d,
                     hps.train.learning_rate,
                     epoch,
                     os.path.join(hps.model_dir, "D_{}.pth".format(global_step)),
                 )
-                utils.save_checkpoint(
+                task.save_checkpoint(
                     net_wd,
                     optim_wd,
                     hps.train.learning_rate,
@@ -716,7 +692,7 @@ def train_and_evaluate(
                     os.path.join(hps.model_dir, "WD_{}.pth".format(global_step)),
                 )
                 if net_dur_disc is not None:
-                    utils.save_checkpoint(
+                    task.save_checkpoint(
                         net_dur_disc,
                         optim_dur_disc,
                         hps.train.learning_rate,
@@ -725,7 +701,7 @@ def train_and_evaluate(
                     )
                 keep_ckpts = config.train_ms_config.keep_ckpts
                 if keep_ckpts > 0:
-                    utils.clean_checkpoints(
+                    task.clean_checkpoints(
                         path_to_models=hps.model_dir,
                         n_ckpts_to_keep=keep_ckpts,
                         sort_by_time=True,
@@ -756,16 +732,12 @@ def evaluate(hps, generator, eval_loader, writer_eval):
             tone,
             language,
             bert,
-            ja_bert,
-            en_bert,
         ) in enumerate(eval_loader):
             x, x_lengths = x.cuda(), x_lengths.cuda()
             spec, spec_lengths = spec.cuda(), spec_lengths.cuda()
             y, y_lengths = y.cuda(), y_lengths.cuda()
             speakers = speakers.cuda()
             bert = bert.cuda()
-            ja_bert = ja_bert.cuda()
-            en_bert = en_bert.cuda()
             tone = tone.cuda()
             language = language.cuda()
             for use_sdp in [True, False]:
@@ -776,8 +748,6 @@ def evaluate(hps, generator, eval_loader, writer_eval):
                     tone,
                     language,
                     bert,
-                    ja_bert,
-                    en_bert,
                     y=spec,
                     max_len=1000,
                     sdp_ratio=0.0 if not use_sdp else 1.0,
@@ -804,7 +774,7 @@ def evaluate(hps, generator, eval_loader, writer_eval):
                 )
                 image_dict.update(
                     {
-                        f"gen/mel_{batch_idx}": utils.plot_spectrogram_to_numpy(
+                        f"gen/mel_{batch_idx}": task.plot_spectrogram_to_numpy(
                             y_hat_mel[0].cpu().numpy()
                         )
                     }
@@ -818,14 +788,14 @@ def evaluate(hps, generator, eval_loader, writer_eval):
                 )
                 image_dict.update(
                     {
-                        f"gt/mel_{batch_idx}": utils.plot_spectrogram_to_numpy(
+                        f"gt/mel_{batch_idx}": task.plot_spectrogram_to_numpy(
                             mel[0].cpu().numpy()
                         )
                     }
                 )
                 audio_dict.update({f"gt/audio_{batch_idx}": y[0, :, : y_lengths[0]]})
 
-    utils.summarize(
+    task.summarize(
         writer=writer_eval,
         global_step=global_step,
         images=image_dict,
